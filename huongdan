@@ -1,0 +1,10 @@
+cấp quyền gpio
+sudo chown root:gpio /dev/gpiomem
+sudo chmod 660 /dev/gpiomem
+
+Cấp quyền lidar
+source /opt/ros/jazzy/setup.bash
+source ~/ws_lidar/install/setup.bash
+sudo chmod 777 /dev/ttyUSB0
+
+GitHub
