@@ -8,3 +8,6 @@ source ~/ws_lidar/install/setup.bash
 sudo chmod 777 /dev/ttyUSB0
 
 GitHub
+git add .
+git commit -m "Cập nhật code mới"
+git push origin main

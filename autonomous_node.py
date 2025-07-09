@@ -1,11 +1,12 @@
-import os, math, json, socket, threading, time
+# autonomous_node.py
+import os, math, json, socket, threading
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from motor_control import move_vehicle, stop_all
 from receiver import limit_active
-from odometry import Odometry
+import time
 
 class LiDARNode(Node):
     def __init__(self, counts):
@@ -18,7 +19,6 @@ class LiDARNode(Node):
         self.moving = False
         self.last_action_time = self.get_clock().now()
 
-        self.odometry = Odometry()
         self.connect_to_pi5()
         self.ping_thread = threading.Thread(target=self.ping_loop, daemon=True)
         self.ping_thread.start()
@@ -26,11 +26,11 @@ class LiDARNode(Node):
     def connect_to_pi5(self):
         while True:
             try:
-                print("[Pi4] 🔄 Đang kết nối tới Pi5...")
+                print("[Pi4] 🔄 Đang cố kết nối tới Pi5...")
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect(("192.168.100.2", 8899))
                 self.sock.settimeout(0.1)
-                print("[Pi4] ✅ Kết nối thành công – Gửi LiDAR + Pose đến Pi5")
+                print("[Pi4] ✅ Kết nối lại thành công – Gửi LiDAR đến Pi5")
                 break
             except:
                 time.sleep(2)
@@ -49,7 +49,7 @@ class LiDARNode(Node):
                 except socket.timeout:
                     pass
                 if now - self.last_pong_time > 3:
-                    print("[Pi4] ❌ Mất kết nối Pi5 – Dừng xe")
+                    print("[Pi4] ❌ Mất kết nối với Pi5 – Dừng xe")
                     stop_all()
                     self.sock.close()
                     self.connect_to_pi5()
@@ -60,18 +60,32 @@ class LiDARNode(Node):
 
     def scan_callback(self, msg):
         if limit_active:
-            print("[TỰ HÀNH] 🚫 Dừng do công tắc được nhấn – Ưu tiên xử lý tránh vật.")
             return
 
-        self.odometry.update(self.counts)
-        pose = self.odometry.get_pose()
-
         try:
+            # ✅ Lọc chỉ 180° phía trước (-90° đến +90°)
+            filtered_ranges = []
+            start_idx = None
+            end_idx = None
+            for i, distance in enumerate(msg.ranges):
+                angle = msg.angle_min + i * msg.angle_increment
+                deg = math.degrees(angle)
+                if -90 <= deg <= 90:
+                    if start_idx is None:
+                        start_idx = i
+                    end_idx = i
+                    filtered_ranges.append(distance)
+
+            if start_idx is None or end_idx is None:
+                print("[AI] ❌ Không tìm được góc quét hợp lệ – Dừng")
+                stop_all()
+                self.moving = False
+                return
+
             self.sock.sendall((json.dumps({
-                "ranges": list(msg.ranges),
-                "angle_min": msg.angle_min,
-                "angle_increment": msg.angle_increment,
-                "pose": pose
+                "ranges": filtered_ranges,
+                "angle_min": math.radians(-90),
+                "angle_increment": msg.angle_increment
             }) + "\n").encode())
         except:
             self.sock.close()
@@ -93,7 +107,7 @@ class LiDARNode(Node):
                 map_array[y][x] = '#'
             if 60 <= deg <= 120:
                 free_r.append(distance)
-            elif -50 <= deg <= 50:
+            elif -70 <= deg <= 70:
                 free_c.append(distance)
             elif -120 <= deg <= -60:
                 free_l.append(distance)
@@ -113,28 +127,29 @@ class LiDARNode(Node):
         for row in map_array[::-1]:
             print(" ".join(row))
         print(f"[DEBUG] Trái={mean_l:.2f} | Giữa={mean_c:.2f} | Phải={mean_r:.2f}")
-        print(f"[POSE] X={pose['x']:.2f} m | Y={pose['y']:.2f} m | θ={math.degrees(pose['theta']):.1f}°")
 
         now = self.get_clock().now()
         if (now - self.last_action_time).nanoseconds / 1e9 > 0.5 and not self.moving:
             if mean_c > THRESH_CLEAR:
                 self.safe_move("forward")
-            elif mean_l > mean_r and mean_l > THRESH_CLEAR / 2:
-                self.safe_move("left")
-            elif mean_r > mean_l and mean_r > THRESH_CLEAR / 2:
-                self.safe_move("right")
+            elif max(mean_l, mean_r) > THRESH_CLEAR / 2:
+                if mean_l > mean_r:
+                    self.safe_move("left")
+                else:
+                    self.safe_move("right")
             else:
                 self.safe_move("backward")
             self.last_action_time = now
 
     def safe_move(self, direction):
-        if self.moving or limit_active:
+        if self.moving:
             return
         def worker():
             self.moving = True
             move_vehicle(direction, 0.02, 1.0, self.counts)
             self.moving = False
         threading.Thread(target=worker, daemon=True).start()
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -144,5 +159,6 @@ def main(args=None):
     node.destroy_node()
     rclpy.shutdown()
 
-if __name__ == '__main__':
+
+if __name__ == '_main_':
     main()
