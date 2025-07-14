@@ -1,14 +1,11 @@
 import socket
 import threading
-from motor_control import move_vehicle
+from motor_control import move_vehicle, stop_all
 import time
-
-# Biến toàn cục: Pi4 dùng để dừng tự hành khi công tắc được nhấn
-limit_active = False
+import shared_state  # Biến chia sẻ trạng thái tự hành và tránh va
 
 def start_receiver(shared_counts):
     def run():
-        global limit_active
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(('', 9999))
@@ -52,27 +49,58 @@ def start_receiver(shared_counts):
                             }
                             print(f"[LIMIT] {sw_data}")
 
-                            # Nếu có bất kỳ công tắc nào được nhấn
-                            if sw_data.get('L1') or sw_data.get('L2'):
-                                if not limit_active:
-                                    limit_active = True
-                                    print("[⚠️] L1/L2 được nhấn – Tiến 1s → Xoay phải 1s")
-                                    move_vehicle("forward", 0.1, 1.0, shared_counts)
-                                    time.sleep(0.2)
-                                    move_vehicle("right", 0.1, 1.0, shared_counts)
+                            # Lấy trạng thái từng công tắc
+                            l1 = sw_data.get('L1', 0)
+                            l2 = sw_data.get('L2', 0)
+                            l3 = sw_data.get('L3', 0)
+                            l4 = sw_data.get('L4', 0)
 
-                            elif sw_data.get('L3') or sw_data.get('L4'):
-                                if not limit_active:
-                                    limit_active = True
-                                    print("[⚠️] L3/L4 được nhấn – Lùi 1s → Xoay trái 1s")
-                                    move_vehicle("backward", 0.1, 1.0, shared_counts)
-                                    time.sleep(0.2)
-                                    move_vehicle("left", 0.1, 1.0, shared_counts)
+                            # ❗ Kiểm tra các trường hợp dừng khẩn cấp
+                            dangerous_combination = (
+                                (l1 and l3) or
+                                (l2 and l3) or
+                                (l1 and l4) or
+                                (l2 and l4) or
+                                (l1 and l2 and l3 and l4)
+                            )
+                            if dangerous_combination:
+                                print("[❌] ⚠️ Va chạm đối nghịch hoặc toàn bộ – DỪNG KHẨN CẤP")
+                                stop_all()
+                                shared_state.limit_active = True
+                                continue
+
+                            # Nếu có bất kỳ công tắc nào được nhấn
+                            if any([l1, l2, l3, l4]):
+                                if not shared_state.limit_active:
+                                    shared_state.limit_active = True
+                                    print("[⚠️] Công tắc va chạm được nhấn – DỪNG và CHỜ 1 GIÂY...")
+                                    stop_all()
+                                    time.sleep(1.0)
+
+                                    # Kiểm tra lại sau 1 giây
+                                    if not any([l1, l2, l3, l4]):
+                                        print("[✔️] Công tắc đã nhả sau 1s – Không cần xử lý")
+                                        shared_state.limit_active = False
+                                        continue
+
+                                    # === Xử lý hành vi tránh ===
+                                    if l1 or l2:
+                                        print("[⚠️] L1/L2 giữ – Tiến 1s → Xoay phải 1s")
+                                        move_vehicle("forward", 0.1, 1.0, shared_counts)
+                                        time.sleep(0.2)
+                                        move_vehicle("right", 0.1, 1.0, shared_counts)
+                                        shared_state.limit_active = False
+
+                                    elif l3 or l4:
+                                        print("[⚠️] L3/L4 giữ – Lùi 1s và chờ xử lý LiDAR để xoay")
+                                        move_vehicle("backward", 0.1, 1.0, shared_counts)
+                                        shared_state.escape_required = True  # autonomous_node sẽ xử lý
 
                             else:
-                                if limit_active:
+                                # Nếu công tắc được nhả và không còn chờ escape
+                                if shared_state.limit_active and not shared_state.escape_required:
                                     print("[✔️] Công tắc đã nhả – Cho phép tự hành lại")
-                                limit_active = False
+                                    shared_state.limit_active = False
 
             except Exception as e:
                 print(f"[ERROR] Lỗi nhận Pi5: {e}")
