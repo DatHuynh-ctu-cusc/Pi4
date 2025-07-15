@@ -13,16 +13,12 @@ import shared_state  # Dùng biến toàn cục chia sẻ
 # ==== GPIO cấu hình động cơ ====
 motor1 = Motor(forward=24, backward=25, pwm=True)
 motor1_pwm = PWMOutputDevice(17)
-
 motor2 = Motor(forward=22, backward=23, pwm=True)
 motor2_pwm = PWMOutputDevice(12)
-
 motor3 = Motor(forward=21, backward=27, pwm=True)
 motor3_pwm = PWMOutputDevice(4)
-
 motor4 = Motor(forward=19, backward=20, pwm=True)
 motor4_pwm = PWMOutputDevice(16)
-
 pwm_r1 = motor3_pwm
 pwm_r2 = motor4_pwm
 pwm_l1 = motor1_pwm
@@ -51,10 +47,12 @@ class PID:
         return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
 
 def stop_all():
+    print("[DEBUG] stop_all() được gọi.")
     motor1.stop(); motor2.stop(); motor3.stop(); motor4.stop()
     pwm_l1.value = pwm_l2.value = pwm_r1.value = pwm_r2.value = 0
 
 def set_motor(forward_l, forward_r):
+    print(f"[DEBUG] set_motor(forward_l={forward_l}, forward_r={forward_r})")
     if forward_l:
         motor1.forward(); motor2.forward()
     else:
@@ -66,6 +64,7 @@ def set_motor(forward_l, forward_r):
 
 def move_vehicle(direction="forward", target_rps=0.15, duration=1.0):
     global count_r1, count_r2, count_l1, count_l2
+    print(f"[DEBUG] move_vehicle(direction={direction}, running_scan={shared_state.running_scan})")
     # --- KHÔNG BAO GIỜ cho phép chạy nếu chưa start_scan! ---
     if not shared_state.running_scan:
         print("[SECURITY] move_vehicle bị chặn vì chưa start_scan.")
@@ -90,6 +89,7 @@ def move_vehicle(direction="forward", target_rps=0.15, duration=1.0):
     elif direction == "right":
         set_motor(False, True)
     else:
+        print("[DEBUG] move_vehicle: direction không hợp lệ.")
         return
 
     start = last = time.time()
@@ -152,6 +152,7 @@ def receive_from_pi5():
                         l3 = sw_data.get('L3', 0)
                         l4 = sw_data.get('L4', 0)
                         print(f"[LIMIT] L1={l1}, L2={l2}, L3={l3}, L4={l4}")
+                        print(f"[DEBUG] receive_from_pi5: running_scan={shared_state.running_scan}")
 
                         # --- Ngăn không tránh vật khi chưa start_scan ---
                         if not shared_state.running_scan:
@@ -202,6 +203,7 @@ class LiDARNode(Node):
                 time.sleep(2)
 
     def scan_callback(self, msg):
+        print(f"[DEBUG] scan_callback: running_scan={shared_state.running_scan}")
         # --- Ngăn tự hành khi chưa start_scan ---
         if not shared_state.running_scan:
             stop_all()
@@ -262,6 +264,7 @@ class LiDARNode(Node):
 
         now = self.get_clock().now()
         if (now - self.last_action_time).nanoseconds / 1e9 > 0.5 and not self.moving:
+            print(f"[DEBUG] scan_callback: Chuẩn bị gọi safe_move (running_scan={shared_state.running_scan})")
             if mean_c > THRESH_CLEAR:
                 self.safe_move("forward")
             elif mean_l > mean_r:
@@ -274,8 +277,10 @@ class LiDARNode(Node):
 
     def safe_move(self, direction):
         if self.moving:
+            print(f"[DEBUG] safe_move: đã có motor chạy, bỏ qua lệnh mới.")
             return
         def worker():
+            print(f"[DEBUG] safe_move(worker): GỌI move_vehicle({direction}), running_scan={shared_state.running_scan}")
             self.moving = True
             move_vehicle(direction, target_rps=0.08, duration=1.0)
             self.moving = False

@@ -57,6 +57,10 @@ class LiDARNode(Node):
                 time.sleep(2)
 
     def scan_callback(self, msg):
+        # Ngăn robot tự hành nếu chưa nhận lệnh start_scan (qua Bluetooth)
+        if not shared_state.running_scan:
+            stop_all()
+            return
         if shared_state.limit_active and not shared_state.escape_required:
             return
 

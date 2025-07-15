@@ -50,8 +50,6 @@ def on_bt_receive(msg):
         print("[BT] Lệnh không hợp lệ:", cmd)
 
 
-
-
 def main():
     counts = {"E1": 0, "E2": 0, "E3": 0, "E4": 0}
 
