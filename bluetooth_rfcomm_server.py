@@ -1,4 +1,4 @@
-# bluetooth_server.py
+# bluetooth_rfcomm_server.py
 import bluetooth
 import threading
 

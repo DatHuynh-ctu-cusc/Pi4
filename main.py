@@ -5,8 +5,9 @@ import rclpy
 from autonomous_node import LiDARNode
 from receiver import start_receiver
 from motor_control import move_vehicle, stop_all
+from bluetooth_rfcomm_server import BluetoothServer      # <<< THÊM DÒNG NÀY
+import shared_state
 
-from bluetooth_server import BluetoothServer      # <<< THÊM DÒNG NÀY
 
 def start_lidar_ros():
     print("[Pi4] 🚀 Đang khởi động ROS2 LiDAR...")
@@ -19,21 +20,36 @@ def on_bt_receive(msg):
     print("[BT] Lệnh nhận từ Pi5:", msg)
     cmd = msg.strip().lower()
     if cmd == "forward":
-        move_vehicle("forward", 5)
+        if shared_state.running_scan:
+            move_vehicle("forward", 5)
+        else:
+            print("[BT] Chưa ở chế độ quét, lệnh bị bỏ qua.")
     elif cmd == "left":
-        move_vehicle("left", 5)
+        if shared_state.running_scan:
+            move_vehicle("left", 5)
+        else:
+            print("[BT] Chưa ở chế độ quét, lệnh bị bỏ qua.")
     elif cmd == "right":
-        move_vehicle("right", 5)
+        if shared_state.running_scan:
+            move_vehicle("right", 5)
+        else:
+            print("[BT] Chưa ở chế độ quét, lệnh bị bỏ qua.")
     elif cmd == "backward":
-        move_vehicle("backward", 5)
+        if shared_state.running_scan:
+            move_vehicle("backward", 5)
+        else:
+            print("[BT] Chưa ở chế độ quét, lệnh bị bỏ qua.")
     elif cmd == "stop":
         stop_all()
+        shared_state.running_scan = False
+        print("[BT] Đã dừng routine quét map, xe dừng.")
     elif cmd == "start_scan":
-        print("[BT] Đã nhận lệnh bắt đầu quét bản đồ!")
-        # TODO: Thực hiện hành động quét bản đồ tại đây
-        # Ví dụ: Gọi ROS2 node, hoặc kích hoạt routine quét bản đồ, ...
+        shared_state.running_scan = True
+        print("[BT] Đã nhận lệnh bắt đầu quét bản đồ! Xe sẽ bắt đầu chạy.")
     else:
         print("[BT] Lệnh không hợp lệ:", cmd)
+
+
 
 
 def main():

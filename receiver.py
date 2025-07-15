@@ -12,6 +12,8 @@ def start_receiver(shared_counts):
         server.listen(1)
         print("[Pi4] 🟢 Chờ Pi5 gửi encoder + limit switch...")
 
+        already_stopped_due_to_no_scan = False  # <-- thêm biến này ở đây
+
         while True:
             conn, addr = server.accept()
             print(f"[Pi4] ✅ Kết nối Pi5: {addr}")
@@ -54,6 +56,17 @@ def start_receiver(shared_counts):
                             l2 = sw_data.get('L2', 0)
                             l3 = sw_data.get('L3', 0)
                             l4 = sw_data.get('L4', 0)
+
+                            # --- Ngăn routine tránh vật khi chưa start_scan, tránh rung/nhít ---
+                            if not shared_state.running_scan:
+                                if any([l1, l2, l3, l4]):
+                                    if not already_stopped_due_to_no_scan:
+                                        print("[LIMIT] 🚫 Công tắc bị nhấn nhưng chưa start_scan => STOP motor!")
+                                        stop_all()
+                                        already_stopped_due_to_no_scan = True
+                                else:
+                                    already_stopped_due_to_no_scan = False
+                                continue  # Bỏ qua routine tránh vật khi chưa start_scan
 
                             # ❗ Kiểm tra các trường hợp dừng khẩn cấp
                             dangerous_combination = (

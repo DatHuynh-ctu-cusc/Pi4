@@ -1,4 +1,4 @@
-# bluetooth_receiver.py
+# bluetooth_command_listener.py
 import serial
 import threading
 from motor_control import move_vehicle, stop_all

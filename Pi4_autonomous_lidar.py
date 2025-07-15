@@ -1,3 +1,5 @@
+# Pi4_autonomous_lidar.py
+
 import os, math, time, json, threading, socket, subprocess
 import numpy as np
 import rclpy
@@ -5,6 +7,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from gpiozero import Motor, PWMOutputDevice
 from time import sleep
+from bluetooth_rfcomm_server import BluetoothServer
+import shared_state  # Dùng biến toàn cục chia sẻ
 
 # ==== GPIO cấu hình động cơ ====
 motor1 = Motor(forward=24, backward=25, pwm=True)
@@ -27,7 +31,6 @@ pwm_l2 = motor2_pwm
 # ==== Biến encoder nhận từ Pi5 ====
 count_l1 = count_l2 = count_r1 = count_r2 = 0
 CPR = 200
-limit_active = False  # ✅ Flag ưu tiên switch
 
 # ==== PID controller ====
 class PID:
@@ -47,7 +50,6 @@ class PID:
         self.last_error = error
         return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
 
-# ==== Điều khiển PID ====
 def stop_all():
     motor1.stop(); motor2.stop(); motor3.stop(); motor4.stop()
     pwm_l1.value = pwm_l2.value = pwm_r1.value = pwm_r2.value = 0
@@ -64,6 +66,12 @@ def set_motor(forward_l, forward_r):
 
 def move_vehicle(direction="forward", target_rps=0.15, duration=1.0):
     global count_r1, count_r2, count_l1, count_l2
+    # --- KHÔNG BAO GIỜ cho phép chạy nếu chưa start_scan! ---
+    if not shared_state.running_scan:
+        print("[SECURITY] move_vehicle bị chặn vì chưa start_scan.")
+        stop_all()
+        return
+
     count_r1 = count_r2 = count_l1 = count_l2 = 0
 
     pid_r = PID(Kp=0.002, Ki=0.00001, Kd=0.0001, setpoint=target_rps)
@@ -110,9 +118,8 @@ def move_vehicle(direction="forward", target_rps=0.15, duration=1.0):
     finally:
         stop_all()
 
-# ==== Nhận dữ liệu từ Pi5 ====
 def receive_from_pi5():
-    global count_r1, count_r2, count_l1, count_l2, limit_active
+    global count_r1, count_r2, count_l1, count_l2
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(('', 9999))
@@ -146,20 +153,32 @@ def receive_from_pi5():
                         l4 = sw_data.get('L4', 0)
                         print(f"[LIMIT] L1={l1}, L2={l2}, L3={l3}, L4={l4}")
 
+                        # --- Ngăn không tránh vật khi chưa start_scan ---
+                        if not shared_state.running_scan:
+                            stop_all()
+                            continue
+
                         if l1 or l2:
-                            limit_active = True
                             print("[⚠️] L1 hoặc L2 được nhấn – Tiến 2s")
                             move_vehicle("forward", target_rps=0.1, duration=2.0)
                         elif l3 or l4:
-                            limit_active = True
                             print("[⚠️] L3 hoặc L4 được nhấn – Lùi 2s")
                             move_vehicle("backward", target_rps=0.1, duration=2.0)
-                        else:
-                            limit_active = False
-
                 except Exception as e:
                     print(f"[ERROR] Lỗi khi nhận từ Pi5: {e}")
                     break
+
+# ==== Nhận lệnh từ Pi5 qua Bluetooth ====
+def on_bt_receive(msg):
+    msg = msg.strip().lower()
+    print("[BT] Nhận lệnh:", msg)
+    if msg == "start_scan":
+        shared_state.running_scan = True
+        print("[BT] ▶️ Cho phép tự hành!")
+    elif msg == "stop":
+        shared_state.running_scan = False
+        stop_all()
+        print("[BT] ⏹️ Dừng tự hành!")
 
 # ==== ROS2 Node tự hành ====
 class LiDARNode(Node):
@@ -183,10 +202,12 @@ class LiDARNode(Node):
                 time.sleep(2)
 
     def scan_callback(self, msg):
-        global limit_active
-        if limit_active:
-            return  # Nếu đang xử lý switch, bỏ qua tự hành
+        # --- Ngăn tự hành khi chưa start_scan ---
+        if not shared_state.running_scan:
+            stop_all()
+            return
 
+        # Autonomous routine bên dưới
         try:
             data = {
                 "ranges": list(msg.ranges),
@@ -260,7 +281,6 @@ class LiDARNode(Node):
             self.moving = False
         threading.Thread(target=worker, daemon=True).start()
 
-# ==== ROS2 Launch ====
 def start_lidar_ros():
     return subprocess.Popen(['ros2', 'launch', 'sllidar_ros2', 'sllidar_c1_launch.py'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -268,6 +288,11 @@ def start_lidar_ros():
 def main():
     lidar_proc = start_lidar_ros()
     threading.Thread(target=receive_from_pi5, daemon=True).start()
+
+    # ==== Khởi động Bluetooth Server ====
+    bt_server = BluetoothServer(on_receive=on_bt_receive)
+    threading.Thread(target=bt_server.start, daemon=True).start()
+
     rclpy.init()
     node = LiDARNode()
     try:
@@ -278,6 +303,7 @@ def main():
         rclpy.shutdown()
         lidar_proc.terminate()
         stop_all()
+        bt_server.close()
 
 if __name__ == '__main__':
     main()
