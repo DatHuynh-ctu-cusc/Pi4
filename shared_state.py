@@ -1,5 +1,5 @@
 # shared_state.py
-
+shared_counts = {"E1": 0, "E2": 0, "E3": 0, "E4": 0}
 # Ngăn tự hành hoạt động nếu đang xử lý công tắc
 limit_active = False
 

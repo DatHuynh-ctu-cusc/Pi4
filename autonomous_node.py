@@ -91,11 +91,11 @@ class LiDARNode(Node):
             if 0 <= x < size and 0 <= y < size:
                 map_array[y][x] = '#'
             if 60 <= deg <= 120:
-                free_r.append(distance)
+                free_l.append(distance)
             elif -50 <= deg <= 50:
                 free_c.append(distance)
             elif -120 <= deg <= -60:
-                free_l.append(distance)
+                free_r.append(distance)
             valid_points += 1
 
         if valid_points == 0:
