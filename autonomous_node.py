@@ -6,6 +6,8 @@ from sensor_msgs.msg import LaserScan
 from motor_control import move_vehicle, stop_all
 import shared_state  # ✅ Sử dụng trạng thái dùng chung
 
+SHOW_DEBUG = False  # ✅ Bật = True nếu muốn xem bản đồ ASCII và debug
+
 class LiDARNode(Node):
     def __init__(self, counts):
         super().__init__('lidar_node')
@@ -57,17 +59,10 @@ class LiDARNode(Node):
                 time.sleep(2)
 
     def scan_callback(self, msg):
-        # Ngăn robot tự hành nếu chưa nhận lệnh start_scan (qua Bluetooth)
-        if not shared_state.running_scan:
-            stop_all()
-            return
-        if shared_state.limit_active and not shared_state.escape_required:
-            return
-
+        # 1. Gửi LiDAR sang Pi5
         try:
-            # ✅ Gửi toàn bộ ranges (KHÔNG LỌC NỮA)
             self.sock.sendall((json.dumps({
-                "ranges": list(msg.ranges),  # ⚠️ phải ép list() nếu msg.ranges là tuple
+                "ranges": list(msg.ranges),
                 "angle_min": msg.angle_min,
                 "angle_increment": msg.angle_increment
             }) + "\n").encode())
@@ -75,7 +70,14 @@ class LiDARNode(Node):
             self.sock.close()
             self.connect_to_pi5()
 
-        # ✅ Phần tự hành bên dưới vẫn giữ nguyên (chỉ xử lý trong vùng nhất định)
+        # 2. Kiểm tra chế độ quét
+        if not shared_state.running_scan:
+            stop_all()
+            return
+        if shared_state.limit_active and not shared_state.escape_required:
+            return
+
+        # 3. Phân tích LiDAR để điều khiển tự hành
         size, scale, center = 40, 0.1, 20
         map_array = np.full((size, size), '.', dtype=str)
         THRESH_CLEAR = 1.4
@@ -107,11 +109,13 @@ class LiDARNode(Node):
         mean_c = np.mean([d for d in free_c if d < 3.0]) if free_c else 0
         mean_r = np.mean([d for d in free_r if d < 3.0]) if free_r else 0
 
-        os.system("clear")
-        for row in map_array[::-1]:
-            print(" ".join(row))
-        print(f"[DEBUG] Trái={mean_l:.2f} | Giữa={mean_c:.2f} | Phải={mean_r:.2f}")
+        if SHOW_DEBUG:
+            os.system("clear")
+            for row in map_array[::-1]:
+                print(" ".join(row))
+            print(f"[DEBUG] Trái={mean_l:.2f} | Giữa={mean_c:.2f} | Phải={mean_r:.2f}")
 
+        # 4. Xử lý thoát va chạm
         if shared_state.escape_required:
             print("[AI] 🔄 Đang xử lý hướng thoát sau va chạm L3/L4")
             if mean_l > mean_r:
@@ -122,6 +126,7 @@ class LiDARNode(Node):
             shared_state.limit_active = False
             return
 
+        # 5. Điều hướng tự động
         now = self.get_clock().now()
         if (now - self.last_action_time).nanoseconds / 1e9 > 0.5 and not self.moving:
             if mean_c > THRESH_CLEAR:
@@ -136,7 +141,6 @@ class LiDARNode(Node):
                 stop_all()
                 self.moving = False
             self.last_action_time = now
-
 
     def safe_move(self, direction):
         if self.moving:

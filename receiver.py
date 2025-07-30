@@ -12,7 +12,9 @@ def start_receiver(shared_counts):
         server.listen(1)
         print("[Pi4] 🟢 Chờ Pi5 gửi encoder + limit switch...")
 
-        already_stopped_due_to_no_scan = False  # <-- thêm biến này ở đây
+        already_stopped_due_to_no_scan = False
+        prev_enc_data = {}
+        prev_limit_data = {}
 
         while True:
             conn, addr = server.accept()
@@ -39,25 +41,28 @@ def start_receiver(shared_counts):
                                 kv.split(':')[0]: int(kv.split(':')[1])
                                 for kv in enc_block.split(';') if ':' in kv
                             }
-                            shared_counts.update(enc_data)
-                            print(f"[ENCODER] {shared_counts}")
+                            if enc_data != prev_enc_data:
+                                shared_counts.update(enc_data)
+                                print(f"[ENCODER] {shared_counts}")
+                                prev_enc_data = enc_data.copy()
 
                         # === Nhận LIMIT SWITCH ===
-                        if "LIMITS{" in line:
+                        elif "LIMITS{" in line:
                             sw_block = line.split("LIMITS{")[1].split("}")[0]
                             sw_data = {
                                 kv.split(':')[0]: int(kv.split(':')[1])
                                 for kv in sw_block.split(';') if ':' in kv
                             }
-                            print(f"[LIMIT] {sw_data}")
 
-                            # Lấy trạng thái từng công tắc
+                            if sw_data != prev_limit_data:
+                                print(f"[LIMIT] {sw_data}")
+                                prev_limit_data = sw_data.copy()
+
                             l1 = sw_data.get('L1', 0)
                             l2 = sw_data.get('L2', 0)
                             l3 = sw_data.get('L3', 0)
                             l4 = sw_data.get('L4', 0)
 
-                            # --- Ngăn routine tránh vật khi chưa start_scan, tránh rung/nhít ---
                             if not shared_state.running_scan:
                                 if any([l1, l2, l3, l4]):
                                     if not already_stopped_due_to_no_scan:
@@ -66,23 +71,20 @@ def start_receiver(shared_counts):
                                         already_stopped_due_to_no_scan = True
                                 else:
                                     already_stopped_due_to_no_scan = False
-                                continue  # Bỏ qua routine tránh vật khi chưa start_scan
+                                continue
 
-                            # ❗ Kiểm tra các trường hợp dừng khẩn cấp
-                            dangerous_combination = (
-                                (l1 and l3) or
-                                (l2 and l3) or
-                                (l1 and l4) or
-                                (l2 and l4) or
+                            # Dừng khẩn cấp khi va chạm đối nghịch
+                            dangerous = (
+                                (l1 and l3) or (l2 and l3) or
+                                (l1 and l4) or (l2 and l4) or
                                 (l1 and l2 and l3 and l4)
                             )
-                            if dangerous_combination:
+                            if dangerous:
                                 print("[❌] ⚠️ Va chạm đối nghịch hoặc toàn bộ – DỪNG KHẨN CẤP")
                                 stop_all()
                                 shared_state.limit_active = True
                                 continue
 
-                            # Nếu có bất kỳ công tắc nào được nhấn
                             if any([l1, l2, l3, l4]):
                                 if not shared_state.limit_active:
                                     shared_state.limit_active = True
@@ -96,21 +98,20 @@ def start_receiver(shared_counts):
                                         shared_state.limit_active = False
                                         continue
 
-                                    # === Xử lý hành vi tránh ===
+                                    # === Hành vi tránh ===
                                     if l1 or l2:
-                                        print("[⚠️] L1/L2 giữ – Tiến 1s → Xoay phải 1s")
+                                        print("[⚠️] L1/L2 giữ – Tiến 0.1s → Xoay phải 0.1s")
                                         move_vehicle("forward", 0.1, 1.0, shared_counts)
                                         time.sleep(0.2)
                                         move_vehicle("right", 0.1, 1.0, shared_counts)
                                         shared_state.limit_active = False
 
                                     elif l3 or l4:
-                                        print("[⚠️] L3/L4 giữ – Lùi 1s và chờ xử lý LiDAR để xoay")
+                                        print("[⚠️] L3/L4 giữ – Lùi 0.1s và chờ xử lý LiDAR để xoay")
                                         move_vehicle("backward", 0.1, 1.0, shared_counts)
-                                        shared_state.escape_required = True  # autonomous_node sẽ xử lý
+                                        shared_state.escape_required = True
 
                             else:
-                                # Nếu công tắc được nhả và không còn chờ escape
                                 if shared_state.limit_active and not shared_state.escape_required:
                                     print("[✔️] Công tắc đã nhả – Cho phép tự hành lại")
                                     shared_state.limit_active = False

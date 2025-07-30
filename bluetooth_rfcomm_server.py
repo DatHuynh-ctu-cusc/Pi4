@@ -44,17 +44,3 @@ class BluetoothServer:
         if self.server_sock:
             self.server_sock.close()
         print("🔌 Đã đóng kết nối Bluetooth.")
-
-# --- Test nhanh khi chạy riêng lẻ ---
-if __name__ == "__main__":
-    def on_recv(msg):
-        print("[DEBUG] Nhận:", msg)
-        # (Có thể gọi hàm điều khiển robot tại đây)
-    bt_server = BluetoothServer(on_receive=on_recv)
-    bt_server.start()
-    while True:
-        msg = input("Nhập lệnh gửi đến Pi5 (q để thoát): ")
-        if msg.lower() == "q":
-            bt_server.close()
-            break
-        bt_server.send(msg)
