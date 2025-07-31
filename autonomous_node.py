@@ -69,6 +69,10 @@ class LiDARNode(Node):
         except:
             self.sock.close()
             self.connect_to_pi5()
+            
+        # ❌ Bỏ qua nếu đang chạy theo đường vẽ
+        if shared_state.running_path:
+            return  # 🛑 Đang chạy theo đường, không xử lý tự hành
 
         # 2. Kiểm tra chế độ quét
         if not shared_state.running_scan:

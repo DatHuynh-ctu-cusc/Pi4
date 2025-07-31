@@ -8,3 +8,6 @@ escape_required = False
 
 # Cờ cho phép robot di chuyển tự hành và tránh vật (chỉ True khi đã nhận lệnh start_scan từ Pi5)
 running_scan = False
+
+
+running_path = False  
