@@ -1,9 +1,10 @@
+# path_node.py
 import time
 from motor_control import move_vehicle, stop_all
 import shared_state
 
 def parse_command(command):
-    """Chuyển chuỗi thành (direction, value)."""
+    """Chuyển chuỗi lệnh thành (hướng, giá trị)."""
     parts = command.strip().lower().split()
     if len(parts) == 2:
         direction, val = parts
@@ -15,28 +16,42 @@ def parse_command(command):
     return None, None
 
 def execute_path(path_string, counts):
-    """
-    Thực hiện đường đi được gửi từ Pi5, dạng: 'forward 0.5; right 90; forward 1.2'
-    """
-    commands = path_string.split(";")
+    if shared_state.running_scan:
+        print("[PATH] 🚫 Đang quét bản đồ, bỏ qua lệnh path.")
+        return
+
+    shared_state.running_path = True
+    print("[PATH] 🧭 Bắt đầu chạy theo đường vẽ...")
+
+    commands = [cmd.strip() for cmd in path_string.split(";") if cmd.strip()]
+
     for raw_cmd in commands:
         direction, value = parse_command(raw_cmd)
         if direction is None:
             print(f"[PATH] ⚠️ Bỏ qua lệnh không hợp lệ: {raw_cmd}")
             continue
 
-        print(f"[PATH] 🚗 Đang thực hiện: {direction} {value}")
+        print(f"[PATH] ▶️ {direction} {value}")
+
         if direction in ["forward", "backward"]:
-            move_vehicle(direction, 0.25, value, counts)
-        elif direction in ["left", "right"]:
-            # giả sử value là góc độ, ta chuyển sang thời gian (cần sửa nếu dùng encoder)
-            duration = value / 90.0  # ví dụ: 90 độ = 1s
+            # Hệ số: 3.33 giây / mét
+            duration = value * 3.33
+            move_vehicle(direction, 0.25, duration, counts)
+        elif direction == "left":
+            # Hệ số: 0.0274 giây / độ
+            duration = value * 0.0274
+            move_vehicle(direction, 0.25, duration, counts)
+        elif direction == "right":
+            # Hệ số: 0.0317 giây / độ
+            duration = value * 0.0317
             move_vehicle(direction, 0.25, duration, counts)
         else:
             print(f"[PATH] ❌ Lệnh không hỗ trợ: {direction}")
 
         time.sleep(0.2)
 
-    stop_all()
-    print("[PATH] ✅ Đã hoàn thành đường đi.")
+    shared_state.running_path = False
 
+    stop_all()
+    shared_state.running_path = False
+    print("[PATH] ✅ Hoàn tất lộ trình.")
